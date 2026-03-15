@@ -1,0 +1,232 @@
+---
+output: html_document
+runtime: shiny
+---
+---
+
+Title: "Statistical & Supply Chain Analytics Dashboard"
+output:
+flexdashboard::flex_dashboard:
+orientation: rows
+vertical_layout: fill
+theme: darkly
+runtime: shiny
+--------------
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(plotly)
+library(DT)
+library(lubridate)
+library(shiny)
+library(corrplot)
+library(forecast)
+library(randomForest)
+
+amazon_sales_dataset <- read_csv("amazon_sales_dataset.csv")
+
+amazon_sales_dataset$order_month <- month(amazon_sales_dataset$order_date, label = TRUE)
+```
+
+# Analysis {.tabset}
+
+## Distribution Analysis
+
+```{r}
+renderPlotly({
+
+p <- ggplot(amazon_sales_dataset,
+aes(total_revenue))+
+geom_histogram(bins=30,fill="steelblue")+
+theme_minimal()
+
+ggplotly(p)
+
+})
+```
+
+## Time Series Trend
+
+```{r}
+renderPlotly({
+
+trend <- amazon_sales_dataset %>%
+group_by(order_month) %>%
+summarise(revenue=sum(total_revenue))
+
+p <- ggplot(trend,
+aes(order_month,revenue,group=1))+
+geom_line(size=1,color="cyan")+
+geom_point()+
+theme_minimal()
+
+ggplotly(p)
+
+})
+```
+
+## Regression Analysis
+
+```{r}
+renderPlotly({
+
+p <- ggplot(amazon_sales_dataset,
+aes(discount_percent,total_revenue))+
+geom_point(alpha=0.5,color="orange")+
+geom_smooth(method="lm",color="red")+
+theme_minimal()
+
+ggplotly(p)
+
+})
+```
+
+## Regression Model Output
+
+```{r}
+model <- lm(total_revenue ~ price + discount_percent + quantity_sold + rating,
+data=amazon_sales_dataset)
+
+datatable(summary(model)$coefficients)
+```
+
+## ANOVA Test
+
+```{r}
+anova_model <- aov(total_revenue ~ product_category,
+data=amazon_sales_dataset)
+
+datatable(summary(anova_model)[[1]])
+```
+
+## P-Value Analysis
+
+```{r}
+pvals <- summary(model)$coefficients[,4]
+
+datatable(data.frame(P_Value=pvals))
+```
+
+## Z-Score Outlier Detection
+
+```{r}
+z <- scale(amazon_sales_dataset$total_revenue)
+
+outliers <- amazon_sales_dataset[abs(z)>3,]
+
+datatable(head(outliers,20))
+```
+
+## Correlation Heatmap
+
+```{r}
+num_data <- amazon_sales_dataset %>%
+select(price,discount_percent,quantity_sold,rating,review_count,total_revenue)
+
+cor_matrix <- cor(num_data)
+
+plot_ly(
+z=cor_matrix,
+x=colnames(cor_matrix),
+y=rownames(cor_matrix),
+type="heatmap",
+colors=colorRamp(c("red","black","green"))
+)
+```
+
+## Demand Forecasting (ARIMA)
+
+```{r}
+monthly <- amazon_sales_dataset %>%
+group_by(order_month) %>%
+summarise(revenue=sum(total_revenue))
+
+ts_data <- ts(monthly$revenue)
+
+fit <- auto.arima(ts_data)
+
+forecast_data <- forecast(fit, h=6)
+
+renderPlotly({
+
+p <- autoplot(forecast_data)
+
+ggplotly(p)
+
+})
+```
+
+## Inventory Turnover Analytics
+
+```{r}
+inventory <- amazon_sales_dataset %>%
+group_by(product_category) %>%
+summarise(
+revenue=sum(total_revenue),
+units=sum(quantity_sold)
+)
+
+inventory$turnover <- inventory$revenue / inventory$units
+
+renderPlotly({
+
+p <- ggplot(inventory,
+aes(product_category,turnover,fill=product_category))+
+geom_bar(stat="identity")+
+theme_minimal()
+
+ggplotly(p)
+
+})
+```
+
+## Feature Importance Model
+
+```{r}
+rf_model <- randomForest(
+total_revenue ~ price + discount_percent + quantity_sold + rating + review_count,
+data=amazon_sales_dataset,
+importance=TRUE
+)
+
+importance_df <- data.frame(
+Feature=row.names(importance(rf_model)),
+Importance=importance(rf_model)[,1]
+)
+
+renderPlotly({
+
+p <- ggplot(importance_df,
+aes(reorder(Feature,Importance),Importance))+
+geom_bar(stat="identity",fill="cyan")+
+coord_flip()+
+theme_minimal()
+
+ggplotly(p)
+
+})
+```
+
+## Hypothesis Testing
+
+```{r}
+high_discount <- amazon_sales_dataset$total_revenue[
+amazon_sales_dataset$discount_percent > 20]
+
+low_discount <- amazon_sales_dataset$total_revenue[
+amazon_sales_dataset$discount_percent <= 20]
+
+test <- t.test(high_discount,low_discount)
+
+datatable(data.frame(
+Statistic=test$statistic,
+P_Value=test$p.value
+))
+```
+
+## Statistical Summary
+
+```{r}
+datatable(summary(amazon_sales_dataset))
+```
